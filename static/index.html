@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Crypto Tracker</title>
+<style>
+body { font-family: Arial; }
+.block { border: 1px solid #ccc; padding: 10px; margin: 10px; display: inline-block; vertical-align: top; }
+.connected { background-color: lightgreen; }
+.disconnected { background-color: red; }
+.value { display: inline-block; padding: 2px 5px; transition: background-color 1s; }
+.signal { color: rgb(21, 22, 91); font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Crypto Tracker</h1>
+<div id="exchanges"></div>
+<h2>Signals</h2>
+<div id="signals"></div>
+
+<script>
+let ws;
+let prevData = {};
+
+function connectWebSocket() {
+    ws = new WebSocket("ws://localhost:8082/ws");
+
+    ws.onopen = function() {
+        console.log("WebSocket connection established");
+    };
+
+    ws.onmessage = function(event) {
+        let data = JSON.parse(event.data);
+        let exDiv = document.getElementById("exchanges");
+        exDiv.innerHTML = "";
+
+        for (let name in data) {
+            if (name === "signals") continue;
+            let ex = data[name];
+            let block = document.createElement("div");
+            block.className = "block";
+            block.innerHTML = `<strong>${name}</strong> - <span class="${ex.connected ? 'connected' : 'disconnected'}">${ex.connected ? 'Connected' : 'Disconnected'}</span><br>`;
+
+            for (let sym in ex.prices) {
+                let prev = prevData[name]?.prices?.[sym] || 0;
+                let val = ex.prices[sym];
+                let span = document.createElement("span");
+                span.className = "value";
+                span.textContent = val.toFixed(2);
+                if (prev) {
+                    if (val > prev) span.style.backgroundColor = "lightgreen";
+                    else if (val < prev) span.style.backgroundColor = "red";
+                    setTimeout(() => span.style.backgroundColor = "", 1000);
+                }
+                block.innerHTML += `${sym}: `;
+                block.appendChild(span);
+                block.innerHTML += "<br>";
+            }
+
+            let prevRate = prevData[name]?.refRate || 0;
+            let rate = ex.refRate;
+            let rateSpan = document.createElement("span");
+            rateSpan.className = "value";
+            rateSpan.textContent = rate.toFixed(4);
+            if (prevRate) {
+                if (rate > prevRate) rateSpan.style.backgroundColor = "lightgreen";
+                else if (rate < prevRate) rateSpan.style.backgroundColor = "red";
+                setTimeout(() => rateSpan.style.backgroundColor = "", 1000);
+            }
+            block.innerHTML += `Ref Rate: `;
+            block.appendChild(rateSpan);
+
+            exDiv.appendChild(block);
+        }
+
+        // Signals
+        let sigDiv = document.getElementById("signals");
+        sigDiv.innerHTML = "";
+        data.signals.forEach(s => {
+            let div = document.createElement("div");
+            div.className = "signal";
+            div.textContent = `${s.symbol}: ${s.ex1} ${s.price1.toFixed(2)}(${s.rate1.toFixed(4)}) ↔ ${s.ex2} ${s.price2.toFixed(2)}(${s.rate2.toFixed(4)})`;
+            sigDiv.appendChild(div);
+        });
+
+        prevData = data;
+    };
+
+    ws.onclose = function() {
+        console.log("Server connection closed.");
+        if (confirm("Server connection closed. Reconnect?")) {
+            console.log("Attempting to reconnect...");
+            setTimeout(connectWebSocket, 1000);
+        }
+    };
+
+    ws.onerror = function(err) {
+        console.error("WebSocket error:", err);
+        ws.close();
+    };
+}
+
+connectWebSocket();
+</script>
+</body>
+</html>
