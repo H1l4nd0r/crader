@@ -98,7 +98,7 @@ func subscribeExchangeBybit() {
 	defer conn.Close()
 
 	// Subscribe to BTCUSDT and ETHUSDT trades
-	subMsg := `{"op": "subscribe", "args": ["publicTrade.BTCUSDT", "publicTrade.ETHUSDT", "publicTrade.MYXUSDT"]}`
+	subMsg := `{"op": "subscribe", "args": ["tickers.BTCUSDT", "tickers.ETHUSDT", "tickers.MYXUSDT"]}`
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(subMsg)); err != nil {
 		log.Fatalf("Failed to subscribe to Bybit WebSocket: %v", err)
 	}
@@ -116,43 +116,68 @@ func subscribeExchangeBybit() {
 			break
 		}
 
-		var response struct {
-			Topic string `json:"topic"`
-			Type  string `json:"type"`
-			Ts    int64  `json:"ts"`
-			Data  []struct {
-				T    int64  `json:"T"`
-				S    string `json:"s"`
-				P    string `json:"p"`
-				V    string `json:"v"`
-				Side string `json:"S"`
-				L    string `json:"L"`
-				ID   string `json:"i"`
-				Seq  int    `json:"seq"`
-			} `json:"data"`
+		var msg struct {
+			Type  string          `json:"type"`
+			Topic string          `json:"topic"`
+			Data  json.RawMessage `json:"data"`
 		}
-		if err := json.Unmarshal(message, &response); err != nil {
+		if err := json.Unmarshal(message, &msg); err != nil {
 			log.Printf("Error unmarshalling message from Bybit: %v", err)
 			continue
 		}
 
-		if response.Type == "snapshot" {
-			//continue
-		}
+		// Обработка snapshot
+		if msg.Type == "snapshot" {
+			var snapshotData struct {
+				Ask1Price          string `json:"ask1Price"`
+				Ask1Size           string `json:"ask1Size"`
+				Bid1Price          string `json:"bid1Price"`
+				Bid1Size           string `json:"bid1Size"`
+				CurPreListingPhase string `json:"curPreListingPhase"`
+				FundingRate        string `json:"fundingRate"`
+				HighPrice24h       string `json:"highPrice24h"`
+				IndexPrice         string `json:"indexPrice"`
+				LastPrice          string `json:"lastPrice"`
+				LowPrice24h        string `json:"lowPrice24h"`
+				MarkPrice          string `json:"markPrice"`
+				NextFundingTime    string `json:"nextFundingTime"`
+				OpenInterest       string `json:"openInterest"`
+				OpenInterestValue  string `json:"openInterestValue"`
+				PreOpenPrice       string `json:"preOpenPrice"`
+				PreQty             string `json:"preQty"`
+				PrevPrice1h        string `json:"prevPrice1h"`
+				PrevPrice24h       string `json:"prevPrice24h"`
+				Price24hPcnt       string `json:"price24hPcnt"`
+				Symbol             string `json:"symbol"`
+				TickDirection      string `json:"tickDirection"`
+				Turnover24h        string `json:"turnover24h"`
+				Volume24h          string `json:"volume24h"`
+			}
+			if err := json.Unmarshal(msg.Data, &snapshotData); err != nil {
+				log.Printf("Error unmarshalling snapshot data from Bybit: %v", err)
+				continue
+			}
 
-		for _, trade := range response.Data {
-
-			price, err := strconv.ParseFloat(trade.P, 64)
+			price, err := strconv.ParseFloat(snapshotData.LastPrice, 64)
 			if err != nil {
 				log.Printf("Error parsing price from Bybit: %v", err)
 				continue
 			}
 
+			refRate, err := strconv.ParseFloat(snapshotData.FundingRate, 64)
+			if err != nil {
+				log.Printf("Error parsing refRate from Bybit: %v", err)
+				continue
+			}
+
 			ex.mu.Lock()
-			ex.PrevPrices[trade.S] = ex.Prices[trade.S]
-			ex.Prices[trade.S] = price
+			ex.PrevPrices[snapshotData.Symbol] = ex.Prices[snapshotData.Symbol]
+			ex.Prices[snapshotData.Symbol] = price
+			ex.PrevRefRates[snapshotData.Symbol] = ex.RefRates[snapshotData.Symbol]
+			ex.RefRates[snapshotData.Symbol] = refRate
 			ex.mu.Unlock()
 		}
+
 	}
 }
 
