@@ -176,6 +176,41 @@ func subscribeExchangeBybit() {
 			ex.PrevRefRates[snapshotData.Symbol] = ex.RefRates[snapshotData.Symbol]
 			ex.RefRates[snapshotData.Symbol] = refRate
 			ex.mu.Unlock()
+		} else if msg.Type == "delta" {
+			var deltaData struct {
+				Symbol      string `json:"symbol"`
+				LastPrice   string `json:"lastPrice"`
+				FundingRate string `json:"fundingRate"`
+			}
+			if err := json.Unmarshal(msg.Data, &deltaData); err != nil {
+				log.Printf("Error unmarshalling delta data from Bybit: %v", err)
+				continue
+			}
+
+			if deltaData.LastPrice != "" || deltaData.FundingRate != "" {
+				ex.mu.Lock()
+				if deltaData.LastPrice != "" {
+					price, err := strconv.ParseFloat(deltaData.LastPrice, 64)
+					if err != nil {
+						log.Printf("Error parsing price from Bybit: %v", err)
+						ex.mu.Unlock()
+						continue
+					}
+					ex.PrevPrices[deltaData.Symbol] = ex.Prices[deltaData.Symbol]
+					ex.Prices[deltaData.Symbol] = price
+				}
+				if deltaData.FundingRate != "" {
+					refRate, err := strconv.ParseFloat(deltaData.FundingRate, 64)
+					if err != nil {
+						log.Printf("Error parsing refRate from Bybit: %v", err)
+						ex.mu.Unlock()
+						continue
+					}
+					ex.PrevRefRates[deltaData.Symbol] = ex.RefRates[deltaData.Symbol]
+					ex.RefRates[deltaData.Symbol] = refRate
+				}
+				ex.mu.Unlock()
+			}
 		}
 
 	}
