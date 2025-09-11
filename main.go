@@ -13,18 +13,18 @@ import (
 
 // Структуры данных
 type ExchangeData struct {
-	Connected   bool
-	Prices      map[string]float64
-	PrevPrices  map[string]float64
-	RefRate     float64
-	PrevRefRate float64
-	mu          sync.Mutex
+	Connected    bool
+	Prices       map[string]float64
+	PrevPrices   map[string]float64
+	RefRates     map[string]float64
+	PrevRefRates map[string]float64
+	mu           sync.Mutex
 }
 
 var exchanges = map[string]*ExchangeData{
-	"binance": {Prices: make(map[string]float64), PrevPrices: make(map[string]float64)},
-	"bybit":   {Prices: make(map[string]float64), PrevPrices: make(map[string]float64)},
-	"okx":     {Prices: make(map[string]float64), PrevPrices: make(map[string]float64)},
+	"binance": {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
+	"bybit":   {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
+	"okx":     {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
 }
 
 var wsClients = make(map[*websocket.Conn]bool)
@@ -269,7 +269,7 @@ func collectData() map[string]interface{} {
 		result[name] = map[string]interface{}{
 			"connected": ex.Connected,
 			"prices":    ex.Prices,
-			"refRate":   ex.RefRate,
+			"refRates":  ex.RefRates,
 		}
 		ex.mu.Unlock()
 	}
@@ -291,7 +291,7 @@ func generateSignals() []map[string]interface{} {
 		for name, ex := range exchanges {
 			ex.mu.Lock()
 			p := ex.Prices[sym]
-			r := ex.RefRate
+			r := ex.RefRates[sym]
 			ex.mu.Unlock()
 			prices = append(prices, struct {
 				Name  string

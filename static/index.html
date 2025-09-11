@@ -41,34 +41,28 @@ function connectWebSocket() {
             block.className = "block";
             block.innerHTML = `<strong>${name}</strong> - <span class="${ex.connected ? 'connected' : 'disconnected'}">${ex.connected ? 'Connected' : 'Disconnected'}</span><br>`;
 
-            for (let sym in ex.prices) {
-                let prev = prevData[name]?.prices?.[sym] || 0;
-                let val = ex.prices[sym];
-                let span = document.createElement("span");
-                span.className = "value";
-                span.textContent = val.toFixed(2);
-                if (prev) {
-                    if (val > prev) span.style.backgroundColor = "lightgreen";
-                    else if (val < prev) span.style.backgroundColor = "red";
-                    setTimeout(() => span.style.backgroundColor = "", 1000);
-                }
-                block.innerHTML += `${sym}: `;
-                block.appendChild(span);
-                block.innerHTML += "<br>";
-            }
+for (let sym in ex.prices) {
+    let prev = prevData[name]?.prices?.[sym] || 0;
+    let val = ex.prices[sym];
+    let span = document.createElement("span");
+    span.className = "value";
+    span.textContent = val.toFixed(2);
+    if (prev) {
+        if (val > prev) span.style.backgroundColor = "lightgreen";
+        else if (val < prev) span.style.backgroundColor = "red";
+        setTimeout(() => span.style.backgroundColor = "", 1000);
+    }
+    block.innerHTML += `${sym}: `;
+    block.appendChild(span);
 
-            let prevRate = prevData[name]?.refRate || 0;
-            let rate = ex.refRate;
-            let rateSpan = document.createElement("span");
-            rateSpan.className = "value";
-            rateSpan.textContent = rate.toFixed(4);
-            if (prevRate) {
-                if (rate > prevRate) rateSpan.style.backgroundColor = "lightgreen";
-                else if (rate < prevRate) rateSpan.style.backgroundColor = "red";
-                setTimeout(() => rateSpan.style.backgroundColor = "", 1000);
-            }
-            block.innerHTML += `Ref Rate: `;
-            block.appendChild(rateSpan);
+    let refRate = ex.refRates[sym] || 0;
+    let refRateSpan = document.createElement("span");
+    refRateSpan.className = "value";
+    refRateSpan.textContent = ` (Ref Rate: ${refRate.toFixed(4)})`;
+    block.appendChild(refRateSpan);
+
+    block.innerHTML += "<br>";
+}
 
             exDiv.appendChild(block);
         }
