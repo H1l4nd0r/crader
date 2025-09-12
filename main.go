@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -48,7 +49,7 @@ func subscribeExchangeBinance() {
 	ex.Connected = true
 
 	// Connect to Binance WebSocket
-	conn, _, err := websocket.DefaultDialer.Dial("wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade/myxusdt@trade", nil)
+	conn, _, err := websocket.DefaultDialer.Dial("wss://fstream.binance.com/stream?streams=btcusdt@trade/ethusdt@trade/myxusdt@trade/btcusdt@markPrice/ethusdt@markPrice/myxusdt@markPrice", nil)
 	if err != nil {
 		log.Fatalf("Failed to connect to Binance WebSocket: %v", err)
 	}
@@ -61,28 +62,74 @@ func subscribeExchangeBinance() {
 			break
 		}
 
-		var response struct {
-			Stream string `json:"stream"`
-			Data   struct {
-				Symbol string `json:"s"`
-				Price  string `json:"p"`
-			} `json:"data"`
+		var stream struct {
+			Stream string          `json:"stream"`
+			Data   json.RawMessage `json:"data"`
 		}
-		if err := json.Unmarshal(message, &response); err != nil {
+
+		// Для @trade
+		var trade struct {
+			Symbol string `json:"s"` // символ, например BTCUSDT
+			Price  string `json:"p"` // цена сделки
+		}
+
+		// Для @fundingRate
+		var funding struct {
+			Event                string `json:"e"`
+			EventTime            int64  `json:"E"`
+			Symbol               string `json:"s"`
+			MarkPrice            string `json:"p"`
+			IndexPrice           string `json:"i"`
+			EstimatedSettlePrice string `json:"P"`
+			FundingRate          string `json:"r"`
+			NextFundingTime      int64  `json:"T"`
+		}
+
+		if err := json.Unmarshal(message, &stream); err != nil {
 			log.Printf("Error unmarshalling message from Binance: %v", err)
 			continue
 		}
 
-		price, err := strconv.ParseFloat(response.Data.Price, 64)
-		if err != nil {
-			log.Printf("Error parsing price from Binance: %v", err)
-			continue
+		switch {
+		case stream.Stream == "btcusdt@trade" || stream.Stream == "ethusdt@trade" || stream.Stream == "myxusdt@trade":
+
+			if err := json.Unmarshal(stream.Data, &trade); err == nil {
+				//fmt.Printf("TRADE %s price=%s\n", trade.Symbol, trade.Price)
+
+				price, err := strconv.ParseFloat(trade.Price, 64)
+
+				if err != nil {
+					log.Printf("Error parsing price from Binance: %v", err)
+					continue
+				}
+
+				ex.mu.Lock()
+				ex.PrevPrices[trade.Symbol] = ex.Prices[trade.Symbol]
+				ex.Prices[trade.Symbol] = price
+				ex.mu.Unlock()
+			}
+		case stream.Stream == "btcusdt@markPrice" || stream.Stream == "ethusdt@markPrice" || stream.Stream == "myxusdt@markPrice":
+
+			if err := json.Unmarshal(stream.Data, &funding); err == nil {
+				//fmt.Printf("FUNDING %s rate=%s\n", funding.Symbol, funding.FundingRate)
+
+				rate, err := strconv.ParseFloat(funding.FundingRate, 64)
+
+				if err != nil {
+					log.Printf("Error parsing price from Binance: %v", err)
+					continue
+				}
+
+				ex.mu.Lock()
+				ex.PrevRefRates[funding.Symbol] = ex.RefRates[funding.Symbol]
+				ex.RefRates[funding.Symbol] = rate
+				ex.mu.Unlock()
+			}
+
+		default:
+			fmt.Println("UNKNOWN STREAM:", stream.Stream)
 		}
 
-		ex.mu.Lock()
-		ex.PrevPrices[response.Data.Symbol] = ex.Prices[response.Data.Symbol]
-		ex.Prices[response.Data.Symbol] = price
-		ex.mu.Unlock()
 	}
 }
 
@@ -228,7 +275,7 @@ func subscribeExchangeOKX() {
 	defer conn.Close()
 
 	// Subscribe to BTCUSDT and ETHUSDT trades
-	subMsg := `{"op": "subscribe", "args": [{"channel": "trades", "instId": "BTC-USDT"}, {"channel": "trades", "instId": "ETH-USDT"}, {"channel": "trades", "instId": "MYX-USDT"}]}`
+	subMsg := `{"op": "subscribe", "args": [{"channel": "trades", "instType":"FUTURES", "instId": "BTC-USDT"}, {"channel": "trades","instType":"FUTURES", "instId": "ETH-USDT"}, {"channel": "trades","instType":"FUTURES", "instId": "MYX-USDT"}]}`
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(subMsg)); err != nil {
 		log.Fatalf("Failed to subscribe to OKX WebSocket: %v", err)
@@ -329,12 +376,20 @@ func collectData() map[string]interface{} {
 		result[name] = map[string]interface{}{
 			"connected": ex.Connected,
 			"prices":    ex.Prices,
-			"refRates":  ex.RefRates,
+			"refRates":  formatRefRates(ex.RefRates),
 		}
 		ex.mu.Unlock()
 	}
 	result["signals"] = generateSignals()
 	return result
+}
+
+func formatRefRates(refRates map[string]float64) map[string]string {
+	formattedRefRates := make(map[string]string)
+	for symbol, rate := range refRates {
+		formattedRefRates[symbol] = strconv.FormatFloat(rate, 'f', 8, 64)
+	}
+	return formattedRefRates
 }
 
 // Генерация сигналов если цена отличается >0.05%

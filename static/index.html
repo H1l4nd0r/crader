@@ -55,11 +55,11 @@ for (let sym in ex.prices) {
     block.innerHTML += `${sym}: `;
     block.appendChild(span);
 
-    let refRate = ex.refRates[sym] || 0;
-    let refRateSpan = document.createElement("span");
-    refRateSpan.className = "value";
-    refRateSpan.textContent = ` (Ref Rate: ${refRate.toFixed(4)})`;
-    block.appendChild(refRateSpan);
+let refRate = ex.refRates[sym] || 0;
+let refRateSpan = document.createElement("span");
+refRateSpan.className = "value";
+refRateSpan.textContent = ` (Refund: ${refRate})`;
+block.appendChild(refRateSpan);
 
     block.innerHTML += "<br>";
 }
