@@ -275,7 +275,14 @@ func subscribeExchangeOKX() {
 	defer conn.Close()
 
 	// Subscribe to BTCUSDT and ETHUSDT trades
-	subMsg := `{"op": "subscribe", "args": [{"channel": "trades", "instType":"FUTURES", "instId": "BTC-USDT"}, {"channel": "trades","instType":"FUTURES", "instId": "ETH-USDT"}, {"channel": "trades","instType":"FUTURES", "instId": "MYX-USDT"}]}`
+	subMsg := `{"op": "subscribe", "args": [
+		{"channel": "tickers", "instId": "BTC-USDT-SWAP"}, 
+		{"channel": "tickers", "instId": "ETH-USDT-SWAP"}, 
+		{"channel": "tickers", "instId": "MYX-USDT-SWAP"}, 
+		{"channel": "funding-rate","instId": "BTC-USDT-SWAP"}, 
+		{"channel": "funding-rate","instId": "ETH-USDT-SWAP"}, 
+		{"channel": "funding-rate","instId": "MYX-USDT-SWAP"}
+	]}`
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(subMsg)); err != nil {
 		log.Fatalf("Failed to subscribe to OKX WebSocket: %v", err)
@@ -294,38 +301,77 @@ func subscribeExchangeOKX() {
 			break
 		}
 
-		var response struct {
-			Event string `json:"event"`
-			Arg   struct {
-				Channel string `json:"channel"`
-				InstId  string `json:"instId"`
-			} `json:"arg"`
-			Data []struct {
-				InstId string `json:"instId"`
-				Px     string `json:"px"`
-			} `json:"data"`
+		// Аргументы (канал, инструмент)
+		type Arg struct {
+			Channel string `json:"channel"`
+			InstId  string `json:"instId"`
 		}
-		if err := json.Unmarshal(message, &response); err != nil {
+
+		var resp struct {
+			Arg  Arg             `json:"arg"`
+			Data json.RawMessage `json:"data"`
+		}
+
+		// Структура для тикера
+		var ticker []struct {
+			InstType string `json:"instType"`
+			InstId   string `json:"instId"`
+			Last     string `json:"last"`
+			AskPx    string `json:"askPx"`
+			BidPx    string `json:"bidPx"`
+			High24h  string `json:"high24h"`
+			Low24h   string `json:"low24h"`
+		}
+
+		// Структура для фандинга
+		var fr []struct {
+			InstId          string `json:"instId"`
+			FundingRate     string `json:"fundingRate"`
+			NextFundingTime string `json:"nextFundingTime"`
+		}
+
+		if err := json.Unmarshal(message, &resp); err != nil {
 			log.Printf("Error unmarshalling message from OKX: %v", err)
 			continue
 		}
 
-		if response.Event == "subscribe" {
-			continue
-		}
+		switch resp.Arg.Channel {
+		case "tickers":
 
-		for _, trade := range response.Data {
-			price, err := strconv.ParseFloat(trade.Px, 64)
-			if err != nil {
-				log.Printf("Error parsing price from OKX: %v", err)
-				continue
+			if err := json.Unmarshal(resp.Data, &ticker); err == nil {
+				//fmt.Printf("Цена %s: %s USDT (bid=%s ask=%s)\n",ticker[0].InstId, ticker[0].Last, ticker[0].BidPx, ticker[0].AskPx)
+
+				price, err := strconv.ParseFloat(ticker[0].Last, 64)
+				if err != nil {
+					log.Printf("Error parsing price from OKX: %v", err)
+					continue
+				}
+
+				ex.mu.Lock()
+				ex.PrevPrices[ticker[0].InstId] = ex.Prices[ticker[0].InstId]
+				ex.Prices[ticker[0].InstId] = price
+				ex.mu.Unlock()
 			}
+		case "funding-rate":
 
-			ex.mu.Lock()
-			ex.PrevPrices[trade.InstId] = ex.Prices[trade.InstId]
-			ex.Prices[trade.InstId] = price
-			ex.mu.Unlock()
+			if err := json.Unmarshal(resp.Data, &fr); err == nil {
+				//fmt.Printf("Funding %s: %s, next=%s\n", fr[0].InstId, fr[0].FundingRate, fr[0].NextFundingTime)
+
+				refRate, err := strconv.ParseFloat(fr[0].FundingRate, 64)
+				if err != nil {
+					log.Printf("Error parsing refRate from Bybit: %v", err)
+					continue
+				}
+
+				ex.mu.Lock()
+				ex.PrevRefRates[fr[0].InstId] = ex.RefRates[fr[0].InstId]
+				ex.RefRates[fr[0].InstId] = refRate
+				ex.mu.Unlock()
+			}
+		default:
+			fmt.Println("Неизвестный канал:", resp.Arg.Channel)
 		}
+
 	}
 }
 
