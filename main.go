@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ var exchanges = map[string]*ExchangeData{
 	"binance": {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
 	"bybit":   {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
 	"okx":     {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
+	"mexc":    {Prices: make(map[string]float64), PrevPrices: make(map[string]float64), RefRates: make(map[string]float64), PrevRefRates: make(map[string]float64)},
 }
 
 var wsClients = make(map[*websocket.Conn]bool)
@@ -33,9 +35,10 @@ var wsMu sync.Mutex
 
 func main() {
 	// Запуск симуляции биржевых данных
-	//go subscribeExchangeBinance()
-	//go subscribeExchangeBybit()
-	//go subscribeExchangeOKX()
+	go subscribeExchangeBinance()
+	go subscribeExchangeBybit()
+	go subscribeExchangeOKX()
+	go subscribeExchangeMEXC()
 
 	// HTTP сервер для фронтенда
 	http.Handle("/", http.FileServer(http.Dir("./static")))
@@ -348,9 +351,11 @@ func subscribeExchangeOKX() {
 					continue
 				}
 
+				symbol := strings.Replace(ticker[0].InstId, "-", "", -1)
+
 				ex.mu.Lock()
-				ex.PrevPrices[ticker[0].InstId] = ex.Prices[ticker[0].InstId]
-				ex.Prices[ticker[0].InstId] = price
+				ex.PrevPrices[symbol] = ex.Prices[symbol]
+				ex.Prices[symbol] = price
 				ex.mu.Unlock()
 			}
 		case "funding-rate":
@@ -364,15 +369,114 @@ func subscribeExchangeOKX() {
 					continue
 				}
 
+				symbol := strings.Replace(fr[0].InstId, "-", "", -1)
+
 				ex.mu.Lock()
-				ex.PrevRefRates[fr[0].InstId] = ex.RefRates[fr[0].InstId]
-				ex.RefRates[fr[0].InstId] = refRate
+				ex.PrevRefRates[symbol] = ex.RefRates[symbol]
+				ex.RefRates[symbol] = refRate
 				ex.mu.Unlock()
 			}
 		default:
 			fmt.Println("Unknown data:", resp)
 		}
 
+	}
+}
+
+func subscribeExchangeMEXC() {
+	ex := exchanges["mexc"]
+	for {
+		ex.Connected = true
+
+		// Connect to MEXC WebSocket
+		conn, _, err := websocket.DefaultDialer.Dial("wss://contract.mexc.com/edge", nil)
+		if err != nil {
+			log.Printf("Failed to connect to MEXC WebSocket: %v, retrying in 5 seconds", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		// Subscribe to ticker data for each symbol separately
+		symbols := []string{"BTC_USDT", "ETH_USDT", "MYX_USDT"}
+		for _, sym := range symbols {
+			subMsg := fmt.Sprintf(`{"method":"sub.ticker","param":{"symbol":"%s"}}`, sym)
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(subMsg)); err != nil {
+				log.Printf("Failed to subscribe to MEXC WebSocket for symbol %s: %v", sym, err)
+				continue
+			}
+		}
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("Error reading message from MEXC: %v, reconnecting", err)
+				conn.Close()
+				break
+			}
+
+			//log.Printf("Raw MEXC message: %s\n", string(message))
+
+			var genericMsg map[string]interface{}
+			if err := json.Unmarshal(message, &genericMsg); err != nil {
+				log.Printf("Error unmarshalling message from MEXC: %v", err)
+				continue
+			}
+
+			channel := genericMsg["channel"].(string)
+
+			if channel == "rs.sub.ticker" {
+				// Subscription response
+				log.Printf("MEXC subscription response: %s\n", string(message))
+			} else if channel == "push.ticker" {
+				// Parse as push.ticker
+				var tickerMsg struct {
+					Channel string `json:"channel"`
+					Symbol  string `json:"symbol"`
+					Ts      int64  `json:"ts"`
+					Data    struct {
+						Ask1          float64 `json:"ask1"`
+						Bid1          float64 `json:"bid1"`
+						ContractId    int     `json:"contractId"`
+						FairPrice     float64 `json:"fairPrice"`
+						FundingRate   float64 `json:"fundingRate"`
+						High24Price   float64 `json:"high24Price"`
+						IndexPrice    float64 `json:"indexPrice"`
+						LastPrice     float64 `json:"lastPrice"`
+						Lower24Price  float64 `json:"lower24Price"`
+						MaxBidPrice   float64 `json:"maxBidPrice"`
+						MinAskPrice   float64 `json:"minAskPrice"`
+						RiseFallRate  float64 `json:"riseFallRate"`
+						RiseFallValue float64 `json:"riseFallValue"`
+						Symbol        string  `json:"symbol"`
+						Timestamp     int64   `json:"timestamp"`
+						HoldVol       float64 `json:"holdVol"`
+						Volume24      float64 `json:"volume24"`
+					} `json:"data"`
+				}
+
+				if err := json.Unmarshal(message, &tickerMsg); err != nil {
+					log.Printf("Error unmarshalling ticker message from MEXC: %v", err)
+					continue
+				}
+
+				symbol := strings.Replace(tickerMsg.Data.Symbol, "_", "", -1) // BTC_USDT -> BTCUSDT
+
+				//log.Printf("MEXC %s: lastPrice=%f, fundingRate=%f\n", symbol, tickerMsg.Data.LastPrice, tickerMsg.Data.FundingRate)
+
+				ex.mu.Lock()
+				ex.PrevPrices[symbol] = ex.Prices[symbol]
+				ex.Prices[symbol] = tickerMsg.Data.LastPrice
+				ex.mu.Unlock()
+
+				ex.mu.Lock()
+				ex.PrevRefRates[symbol] = ex.RefRates[symbol]
+				ex.RefRates[symbol] = tickerMsg.Data.FundingRate
+				ex.mu.Unlock()
+			}
+		}
+
+		// Wait before retry
+		time.Sleep(5 * time.Second)
 	}
 }
 
@@ -503,6 +607,7 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 	go subscribeExchangeBinance()
 	go subscribeExchangeBybit()
 	go subscribeExchangeOKX()
+	go subscribeExchangeMEXC()
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Connections restarted"))
