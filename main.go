@@ -370,7 +370,7 @@ func subscribeExchangeOKX() {
 				ex.mu.Unlock()
 			}
 		default:
-			fmt.Println("Неизвестный канал:", resp.Arg.Channel)
+			fmt.Println("Unknown data:", resp)
 		}
 
 	}

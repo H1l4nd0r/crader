@@ -103,9 +103,9 @@ document.getElementById("restartButton").addEventListener("click", function() {
     })
     .then(response => {
         if (response.ok) {
-            alert("Connections restarted");
             if (ws) {
                 ws.close();
+                ws = null;
             }
             connectWebSocket();
         } else {
