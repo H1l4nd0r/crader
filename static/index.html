@@ -14,6 +14,7 @@ body { font-family: Arial; }
 </head>
 <body>
 <h1>Crypto Tracker</h1>
+<button id="restartButton">Restart Connections</button>
 <div id="exchanges"></div>
 <h2>Signals</h2>
 <div id="signals"></div>
@@ -95,6 +96,27 @@ block.appendChild(refRateSpan);
 }
 
 connectWebSocket();
+
+document.getElementById("restartButton").addEventListener("click", function() {
+    fetch("/restart", {
+        method: "POST"
+    })
+    .then(response => {
+        if (response.ok) {
+            alert("Connections restarted");
+            if (ws) {
+                ws.close();
+            }
+            connectWebSocket();
+        } else {
+            alert("Failed to restart connections");
+        }
+    })
+    .catch(error => {
+        console.error("Error:", error);
+        alert("Failed to restart connections");
+    });
+});
 </script>
 </body>
 </html>

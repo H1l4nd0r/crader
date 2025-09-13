@@ -33,14 +33,15 @@ var wsMu sync.Mutex
 
 func main() {
 	// Запуск симуляции биржевых данных
-	go subscribeExchangeBinance()
-	go subscribeExchangeBybit()
-	go subscribeExchangeOKX()
+	//go subscribeExchangeBinance()
+	//go subscribeExchangeBybit()
+	//go subscribeExchangeOKX()
 
 	// HTTP сервер для фронтенда
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/ws", wsHandler)
 	log.Println("Server started at :8082")
+	http.HandleFunc("/restart", restartHandler)
 	log.Fatal(http.ListenAndServe(":8082", nil))
 }
 
@@ -490,4 +491,19 @@ func abs(a float64) float64 {
 		return -a
 	}
 	return a
+}
+
+func restartHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Re-initiate connections to exchanges
+	go subscribeExchangeBinance()
+	go subscribeExchangeBybit()
+	go subscribeExchangeOKX()
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Connections restarted"))
 }
